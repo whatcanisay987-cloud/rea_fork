@@ -82,7 +82,6 @@ jobs:
       ghidra_bridge: ${{ steps.plan.outputs.ghidra_bridge }}
       website: ${{ steps.plan.outputs.website }}
       matrix: ${{ steps.plan.outputs.matrix }}
-      test_selection: ${{ steps.plan.outputs.test_selection }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -126,7 +125,18 @@ jobs:
           HEAD_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           CI_FULL: ${{ inputs.source_sha != '' || contains(github.event.pull_request.labels.*.name, 'ci:full') }}
           CI_SKIP_FULL: ${{ steps.qualification.outputs.run_full == 'false' }}
+          CI_TEST_SELECTION_FILE: .cache/ci-test-selection/plan.json
         run: node scripts/ci/plan.mjs
+      - name: Retain complete test selection plan
+        if: steps.plan.outputs.code == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-test-selection-plan
+          path: .cache/ci-test-selection/plan.json
+          include-hidden-files: true
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
 
   static:
     name: Static checks
@@ -534,6 +544,12 @@ jobs:
           --reporter=./scripts/ci/test-timing-reporter.mjs
           --outputFile.junit=test-results.xml
           --outputFile.json=test-results.json
+      - name: Download test selection plan
+        if: needs.changes.outputs.code == 'true' && !cancelled()
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ci-test-selection-plan
+          path: .cache/ci-test-selection
       - name: Summarize slowest test files
         if: needs.changes.outputs.code == 'true' && !cancelled()
         env:
@@ -544,14 +560,7 @@ jobs:
           CI_VERIFY_TEST_INVENTORY: "true"
           CI_TEST_SELECTION_FILE: .cache/ci-test-selection/plan.json
           CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        # Keep large diffs out of execve's per-environment-string limit. The
-        # producer emits one JSON line; a quoted heredoc preserves path bytes.
-        run: |
-          mkdir -p .cache/ci-test-selection
-          cat > .cache/ci-test-selection/plan.json <<'REA_TEST_SELECTION_JSON'
-          ${{ needs.changes.outputs.test_selection }}
-          REA_TEST_SELECTION_JSON
-          node scripts/ci/test-report.mjs
+        run: node scripts/ci/test-report.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: needs.changes.outputs.code == 'true' && !cancelled() && hashFiles('test-results.json') != ''
         with:

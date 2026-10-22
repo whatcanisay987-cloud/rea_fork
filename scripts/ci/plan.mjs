@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
-import { matchesGlob } from "node:path";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, matchesGlob } from "node:path";
 import { CI_FLAGS as flags, MANUAL_VERIFIERS, SCOPES } from "./scopes.mjs";
 import { planTestSelection } from "./test-selection.mjs";
 
@@ -300,6 +300,13 @@ const matrix = {
 };
 const testSelection = planTestSelection(files, event, tier);
 const plan = { ...selected, tier, matrix, files, reasons, testSelection };
+// Retain the complete plan outside job outputs: every downstream `needs` value
+// includes those outputs, even when its consumer never uses the changed paths.
+const selectionFile = process.env.CI_TEST_SELECTION_FILE;
+if (selectionFile) {
+  mkdirSync(dirname(selectionFile), { recursive: true });
+  writeFileSync(selectionFile, JSON.stringify(testSelection));
+}
 if (process.env.GITHUB_OUTPUT)
   appendFileSync(
     process.env.GITHUB_OUTPUT,
@@ -307,7 +314,6 @@ if (process.env.GITHUB_OUTPUT)
       ...selected,
       tier,
       matrix: JSON.stringify(matrix),
-      test_selection: JSON.stringify(testSelection),
     })
       .map(([key, value]) => `${key}=${value}\n`)
       .join(""),

@@ -81,6 +81,7 @@ async function classify(
   event = "pull_request",
   full = false,
   skipFull = false,
+  selectionFile = "",
 ) {
   const output = join(directory, "scope-output");
   await writeFile(output, "");
@@ -97,6 +98,7 @@ async function classify(
         CI_FULL: String(full),
         CI_SKIP_FULL: String(skipFull),
         GITHUB_OUTPUT: output,
+        CI_TEST_SELECTION_FILE: selectionFile,
       },
     },
   );
@@ -251,8 +253,31 @@ it("emits an observational owner proposal without changing ordinary or full port
     testSelection: { mode: "full", owners: [] },
   });
   const output = await readFile(join(directory, "scope-output"), "utf8");
-  expect(output).toContain('test_selection={"version":1,"mode":"full"');
+  expect(output).not.toContain("test_selection=");
 });
+
+it("retains a large diff in the plan artifact without enlarging job outputs", async () => {
+  const { directory, base } = await fixture();
+  const paths = Array.from(
+    { length: 1100 },
+    (_, index) => `src/${"long-path-".repeat(12)}${index}.ts`,
+  );
+  const head = await change(directory, paths);
+  const artifactRoot = await createTestTempDirectory(
+    "rea-ci-selection-artifact-",
+  );
+  const selectionFile = join(artifactRoot, "nested/plan.json");
+  await classify(directory, base, head, "push", false, false, selectionFile);
+  const output = await readFile(join(directory, "scope-output"), "utf8");
+  expect(Buffer.byteLength(output)).toBeLessThan(131_072);
+  expect(output).not.toContain("test_selection=");
+  const serialized = await readFile(selectionFile, "utf8");
+  expect(Buffer.byteLength(serialized)).toBeGreaterThan(131_072);
+  expect(JSON.parse(serialized)).toMatchObject({
+    mode: "full",
+    changedPaths: paths.toSorted(),
+  });
+}, 30_000);
 
 it("does not charge a documentation PR for unrelated implementation updates on main", async () => {
   const { directory, base } = await fixture();

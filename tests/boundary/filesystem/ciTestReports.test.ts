@@ -61,6 +61,10 @@ const workflow = async () =>
   z
     .object({
       jobs: z.object({
+        changes: z.object({
+          outputs: z.record(z.string(), z.string()),
+          steps: stepsSchema,
+        }),
         test: z.object({ steps: stepsSchema }),
         build: z.object({ steps: stepsSchema }),
         docs: z.object({ steps: stepsSchema }),
@@ -597,7 +601,7 @@ it("recovers complete module costs from real blob reports without executing test
   ).rejects.toMatchObject({ code: "ENOENT" });
 });
 
-it("transports a large selection through the workflow without environment limits or shell expansion", async () => {
+it("transports a large selection artifact without environment limits or shell expansion", async () => {
   const root = await createTestTempDirectory("rea-ci-large-selection-");
   await workflowGit(root, ["init"]);
   await mkdir(join(root, "tests"));
@@ -628,26 +632,41 @@ it("transports a large selection through the workflow without environment limits
   const plan = planTestSelection(paths, "push", "fast");
   const serialized = JSON.stringify(plan);
   expect(Buffer.byteLength(serialized)).toBeGreaterThan(131_072);
-  const summary = (await workflow()).test!.steps.find((step) =>
+  const jobs = await workflow();
+  const summary = jobs.test!.steps.find((step) =>
     step.run?.includes("scripts/ci/test-report.mjs"),
   );
   if (!summary?.run) throw new Error("Missing timing report step");
+  expect(jobs.changes.outputs).not.toHaveProperty("test_selection");
+  const upload = jobs.changes.steps.find(
+    (step) => step.with?.name === "ci-test-selection-plan",
+  );
+  const download = jobs.test!.steps.find(
+    (step) => step.with?.name === "ci-test-selection-plan",
+  );
+  expect(upload?.with?.path).toBe(".cache/ci-test-selection/plan.json");
+  expect(upload?.with?.["include-hidden-files"]).toBe(true);
+  expect(download?.with?.path).toBe(".cache/ci-test-selection");
+  // Reproduce the downloaded artifact bytes at the workflow's selected path.
+  const selectionFile = join(
+    root,
+    summary.env?.CI_TEST_SELECTION_FILE ?? "missing",
+  );
+  await mkdir(join(selectionFile, ".."), { recursive: true });
+  await writeFile(selectionFile, serialized);
   const invocation = [process.execPath, fileURLToPath(script)]
     .map((path) => `'${path.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`)
     .join(" ");
-  const rendered = summary.run
-    .replace("${{ needs.changes.outputs.test_selection }}", serialized)
-    .replace("node scripts/ci/test-report.mjs", invocation);
+  const rendered = summary.run.replace(
+    "node scripts/ci/test-report.mjs",
+    invocation,
+  );
   const shellScript = join(root, "report.sh");
   await writeFile(shellScript, rendered);
   const environment: NodeJS.ProcessEnv = {
     CI_VERIFY_TEST_INVENTORY: "true",
     CI_TEST_SELECTION_FILE: summary.env?.CI_TEST_SELECTION_FILE ?? "",
   };
-  // Exercise the workflow's actual transport, including its former oversized
-  // environment value, rather than testing only a short file-path helper.
-  if (summary.env?.CI_TEST_SELECTION)
-    environment.CI_TEST_SELECTION = serialized;
   await executeTimingReport(root, environment, ["bash", shellScript]);
   const report = JSON.parse(
     await readFile(join(root, ".cache/ci-test-selection/report.json"), "utf8"),
