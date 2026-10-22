@@ -106,7 +106,9 @@ it("keeps main pushes proposal-only and gates merged-release automation", async 
     branches: ["main"],
   });
   const proposal = workflow.jobs["release-proposal"];
-  expect(proposal.if).toBe("github.event_name == 'push'");
+  expect(proposal.if).toBe(
+    "github.event.repository.fork == false && github.event_name == 'push'",
+  );
   const action = proposal.steps.find((step) =>
     step.uses?.startsWith("googleapis/release-please-action@"),
   );
@@ -120,6 +122,7 @@ it("keeps main pushes proposal-only and gates merged-release automation", async 
   expect(proposal.steps[0]?.run).toContain("rea:release-notes-finalized");
   expect(proposal.steps[0]?.run).toContain("--paginate");
   const merged = workflow.jobs["merged-release"];
+  expect(merged.if).toContain("github.event.repository.fork == false");
   expect(merged.if).toContain("github.event.pull_request.merged == true");
   expect(merged.if).toContain("github.repository");
   expect(merged.if).toContain("release-please--branches--main--");

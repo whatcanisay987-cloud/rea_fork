@@ -4,6 +4,13 @@ Pushes to main automatically open or refresh a Release Please PR with the next
 version and changelog. Review its migration notes and wait for its current CI
 checks to pass. Merging that PR into main starts publication automatically.
 
+Automatic release proposals and publication after a release PR merge run only
+in non-fork repositories. Synchronizing a fork still runs CI, without requiring
+permission to create release PRs or credentials for the upstream package.
+The manual release workflow remains available for explicitly configured releases;
+fork owners must configure their own package/registry identity and publishing
+credentials before using it.
+
 The Release workflow validates the merged release metadata and ancestry before
 creating a tag. npm and MCP Registry publication use the exact reviewed merge
 SHA returned by Release Please. Before either registry is published, the release
