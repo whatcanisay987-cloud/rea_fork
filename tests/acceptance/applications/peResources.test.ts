@@ -322,50 +322,29 @@ const expectPeInventoriesAcrossAdapters = async (
   }
 };
 
-cliTest(
-  "inspects PE32/PE32+ resources through compiled CLI and real stdio MCP without an active target",
-  async ({ cli }) => {
-    const root = await createTestTempDirectory("rea-pe-resource-acceptance-");
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [resolve("scripts/rea.mjs"), "mcp"],
-      cwd: process.cwd(),
-      env: { PATH: process.env.PATH ?? "", REA_LOG_LEVEL: "silent" },
-      stderr: "pipe",
-    });
-    const client = new Client({ name: "pe-resource-acceptance", version: "1" });
-    try {
-      await client.connect(transport);
-      const inventory = await client.listTools();
-      const definition = inventory.tools.find(
-        ({ name }) => name === contract.name,
-      );
-      if (definition === undefined)
-        throw new Error("Missing PE resource tool contract");
-      expect(inventory.tools).toContainEqual(
-        expect.objectContaining({
-          name: contract.name,
-          annotations: expect.objectContaining({
-            readOnlyHint: false,
-            openWorldHint: false,
-          }),
-        }),
-      );
-      const session = await client.callTool({
-        name: "binary_session",
-        arguments: {},
-      });
-      expect(JSON.stringify(session.structuredContent)).toContain(
-        "inspect_pe_resources",
-      );
-      await expectPeInventoriesAcrossAdapters(cli, client, root);
-      await expectPeWordAlignedRecordsAcrossAdapters({
-        cli,
-        client,
-        root,
-        definition,
-      });
-      await expectPeMappingOwnershipAcrossAdapters(cli, client, root);
+const checks: readonly {
+  readonly name: string;
+  readonly verify: (
+    input: Parameters<typeof expectPeWordAlignedRecordsAcrossAdapters>[0],
+  ) => Promise<void>;
+}[] = [
+  {
+    name: "inspects PE32/PE32+ resource inventories and empty payloads",
+    verify: ({ cli, client, root }) =>
+      expectPeInventoriesAcrossAdapters(cli, client, root),
+  },
+  {
+    name: "inspects word-aligned PE resource records",
+    verify: expectPeWordAlignedRecordsAcrossAdapters,
+  },
+  {
+    name: "preserves PE resource mapping ownership",
+    verify: ({ cli, client, root }) =>
+      expectPeMappingOwnershipAcrossAdapters(cli, client, root),
+  },
+  {
+    name: "rejects PE resource padding and malformed or missing inputs",
+    verify: async ({ cli, client, root }) => {
       await expectPePaddingFailureAcrossAdapters({
         cli,
         client,
@@ -378,6 +357,11 @@ cliTest(
         toolName: contract.name,
         root,
       });
+    },
+  },
+  {
+    name: "handles absent PE resources and rejects invalid MCP inputs",
+    verify: async ({ client, root }) => {
       const absent = peResourceFixture();
       absent.bytes.fill(0, absent.directoryAt, absent.directoryAt + 8);
       const path = join(root, "absent.exe");
@@ -421,13 +405,65 @@ cliTest(
         contract.outputSchema.safeParse(rejected.structuredContent).success,
       ).toBe(false);
       await client.ping();
-    } finally {
-      try {
-        await client.close();
-      } finally {
-        await transport.close();
-      }
-    }
+    },
   },
-  30_000,
-);
+];
+
+// Bound each public CLI/MCP scenario independently instead of charging every
+// subprocess startup to one shared 30-second test deadline.
+for (const { name, verify } of checks)
+  cliTest(
+    `${name} through compiled CLI and real stdio MCP without an active target`,
+    async ({ cli }) => {
+      const root = await createTestTempDirectory("rea-pe-resource-acceptance-");
+      const transport = new StdioClientTransport({
+        command: process.execPath,
+        args: [resolve("scripts/rea.mjs"), "mcp"],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? "", REA_LOG_LEVEL: "silent" },
+        stderr: "pipe",
+      });
+      const client = new Client({
+        name: "pe-resource-acceptance",
+        version: "1",
+      });
+      try {
+        await client.connect(transport);
+        const inventory = await client.listTools();
+        const definition = inventory.tools.find(
+          ({ name }) => name === contract.name,
+        );
+        if (definition === undefined)
+          throw new Error("Missing PE resource tool contract");
+        expect(inventory.tools).toContainEqual(
+          expect.objectContaining({
+            name: contract.name,
+            annotations: expect.objectContaining({
+              readOnlyHint: false,
+              openWorldHint: false,
+            }),
+          }),
+        );
+        const session = await client.callTool({
+          name: "binary_session",
+          arguments: {},
+        });
+        expect(JSON.stringify(session.structuredContent)).toContain(
+          "inspect_pe_resources",
+        );
+        await verify({
+          cli,
+          client,
+          root,
+          definition,
+        });
+      } finally {
+        try {
+          await client.close();
+        } finally {
+          await transport.close();
+        }
+      }
+    },
+    30_000,
+  );
