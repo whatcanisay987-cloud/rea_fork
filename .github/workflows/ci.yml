@@ -542,9 +542,16 @@ jobs:
           SOURCE_RESULT: ${{ needs.test-source.result }}
           MERGE_RESULT: ${{ needs.changes.outputs.tier == 'full' && steps.merge.outcome || steps.merge-fast.outcome }}
           CI_VERIFY_TEST_INVENTORY: "true"
-          CI_TEST_SELECTION: ${{ needs.changes.outputs.test_selection }}
+          CI_TEST_SELECTION_FILE: .cache/ci-test-selection/plan.json
           CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node scripts/ci/test-report.mjs
+        # Keep large diffs out of execve's per-environment-string limit. The
+        # producer emits one JSON line; a quoted heredoc preserves path bytes.
+        run: |
+          mkdir -p .cache/ci-test-selection
+          cat > .cache/ci-test-selection/plan.json <<'REA_TEST_SELECTION_JSON'
+          ${{ needs.changes.outputs.test_selection }}
+          REA_TEST_SELECTION_JSON
+          node scripts/ci/test-report.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: needs.changes.outputs.code == 'true' && !cancelled() && hashFiles('test-results.json') != ''
         with:

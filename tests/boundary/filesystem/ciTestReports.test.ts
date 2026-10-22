@@ -23,10 +23,14 @@ const script = new URL("../../../scripts/ci/test-report.mjs", import.meta.url);
 const executeTimingReport = async (
   root: string,
   environment: NodeJS.ProcessEnv = {},
+  command: readonly [string, ...string[]] = [
+    process.execPath,
+    fileURLToPath(script),
+  ],
 ) => {
   const summary = join(root, "summary.md");
   await writeFile(summary, "");
-  const output = await execute(process.execPath, [fileURLToPath(script)], {
+  const output = await execute(command[0], command.slice(1), {
     cwd: root,
     env: {
       ...process.env,
@@ -35,7 +39,7 @@ const executeTimingReport = async (
       SOURCE_REQUIRED: "false",
       SOURCE_RESULT: "",
       CI_VERIFY_TEST_INVENTORY: "false",
-      CI_TEST_SELECTION: "",
+      CI_TEST_SELECTION_FILE: "",
       ...environment,
       GITHUB_STEP_SUMMARY: summary,
     },
@@ -107,9 +111,10 @@ it("merges available failed-shard diagnostics and skips unavailable shard report
   const summary = steps.find((step) =>
     step.run?.includes("scripts/ci/test-report.mjs"),
   );
-  expect(summary?.env?.CI_TEST_SELECTION).toBe(
-    "${{ needs.changes.outputs.test_selection }}",
+  expect(summary?.env?.CI_TEST_SELECTION_FILE).toBe(
+    ".cache/ci-test-selection/plan.json",
   );
+  expect(summary?.env).not.toHaveProperty("CI_TEST_SELECTION");
   const command = steps[gate]?.run;
   if (command === undefined) throw new Error("Missing shard result gate");
   for (const tier of ["fast", "full"]) {
@@ -592,6 +597,71 @@ it("recovers complete module costs from real blob reports without executing test
   ).rejects.toMatchObject({ code: "ENOENT" });
 });
 
+it("transports a large selection through the workflow without environment limits or shell expansion", async () => {
+  const root = await createTestTempDirectory("rea-ci-large-selection-");
+  await workflowGit(root, ["init"]);
+  await mkdir(join(root, "tests"));
+  await writeFile(join(root, "tests/example.test.ts"), "// fixture\n");
+  await workflowGit(root, ["add", "tests"]);
+  await writeFile(
+    join(root, "test-timings.json"),
+    JSON.stringify({
+      version: 1,
+      success: true,
+      reason: "passed",
+      unhandledErrors: 0,
+      files: [
+        { name: "tests/example.test.ts", state: "passed", durationMs: 1 },
+      ],
+    }),
+  );
+  const paths = [
+    ...Array.from(
+      { length: 3000 },
+      (_, index) => `src/${"long-path-".repeat(6)}${index}.ts`,
+    ),
+    "src/$(touch injected).ts",
+    "src/`touch backtick`.ts",
+    "src/'quoted'.ts",
+    "src/newline\nREA_TEST_SELECTION_JSON\ntouch injected\n.ts",
+  ];
+  const plan = planTestSelection(paths, "push", "fast");
+  const serialized = JSON.stringify(plan);
+  expect(Buffer.byteLength(serialized)).toBeGreaterThan(131_072);
+  const summary = (await workflow()).test!.steps.find((step) =>
+    step.run?.includes("scripts/ci/test-report.mjs"),
+  );
+  if (!summary?.run) throw new Error("Missing timing report step");
+  const invocation = [process.execPath, fileURLToPath(script)]
+    .map((path) => `'${path.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`)
+    .join(" ");
+  const rendered = summary.run
+    .replace("${{ needs.changes.outputs.test_selection }}", serialized)
+    .replace("node scripts/ci/test-report.mjs", invocation);
+  const shellScript = join(root, "report.sh");
+  await writeFile(shellScript, rendered);
+  const environment: NodeJS.ProcessEnv = {
+    CI_VERIFY_TEST_INVENTORY: "true",
+    CI_TEST_SELECTION_FILE: summary.env?.CI_TEST_SELECTION_FILE ?? "",
+  };
+  // Exercise the workflow's actual transport, including its former oversized
+  // environment value, rather than testing only a short file-path helper.
+  if (summary.env?.CI_TEST_SELECTION)
+    environment.CI_TEST_SELECTION = serialized;
+  await executeTimingReport(root, environment, ["bash", shellScript]);
+  const report = JSON.parse(
+    await readFile(join(root, ".cache/ci-test-selection/report.json"), "utf8"),
+  ) as unknown;
+  expect(report).toMatchObject({
+    complete: true,
+    plan: { changedPaths: paths },
+  });
+  for (const marker of ["injected", "backtick"])
+    await expect(readFile(join(root, marker))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+});
+
 it("records failed omissions from full reports without treating partial or unhandled outcomes as parity", async () => {
   const root = await createTestTempDirectory("rea-ci-selection-report-");
   await workflowGit(root, ["init"]);
@@ -618,15 +688,20 @@ it("records failed omissions from full reports without treating partial or unhan
   };
   const run = async (report: unknown, source = "failure") => {
     await writeFile(join(root, "test-timings.json"), JSON.stringify(report));
+    const selectionFile = join(root, "selection.json");
+    await writeFile(
+      selectionFile,
+      JSON.stringify(
+        planTestSelection(["src/sqlite/Provider.ts"], "pull_request", "fast"),
+      ),
+    );
     await executeTimingReport(root, {
       SHARD_RESULT: "failure",
       SOURCE_REQUIRED: "true",
       SOURCE_RESULT: source,
       MERGE_RESULT: "failure",
       CI_VERIFY_TEST_INVENTORY: "true",
-      CI_TEST_SELECTION: JSON.stringify(
-        planTestSelection(["src/sqlite/Provider.ts"], "pull_request", "fast"),
-      ),
+      CI_TEST_SELECTION_FILE: selectionFile,
       GITHUB_SHA: "merge-sha",
       CI_PR_HEAD_SHA: "pr-head-sha",
     });
