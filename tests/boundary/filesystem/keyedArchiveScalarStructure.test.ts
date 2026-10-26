@@ -68,9 +68,9 @@ it.each([
       kind: "dictionary",
       value: { payload: "retained" },
     });
-    const value = graph.objects[1]?.value;
+    const value = graph.objects[1]?.value as Record<string, unknown>;
     expect(value).toEqual(object);
-    expect(Object.hasOwn(value!, "__proto__")).toBe(true);
+    expect(Object.hasOwn(value, "__proto__")).toBe(true);
     expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
     expect(value).not.toHaveProperty("inherited");
     expect(graph.limitations).not.toContainEqual(
