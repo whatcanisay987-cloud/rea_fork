@@ -5,6 +5,7 @@ import {
   createAnalysisExecution,
   type AnalysisClient,
   type AnalysisProviderCandidate,
+  type AnalysisProviderInspectionOptions,
   type CapabilityDescriptor,
   type ProviderAvailability,
   type ProviderIdentity,
@@ -14,9 +15,14 @@ import { createAnalysisProfile } from "../../domain/analysisProfile.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
+import {
+  AnalysisCapabilityUnavailableError,
+  AnalysisUnsupportedTargetError,
+  AnalysisCancelledError,
+} from "../../domain/analysisErrorCore.js";
 import { ProviderSelectionError } from "../../domain/providerSelectionError.js";
+import { LinuxOwnedProcessPrerequisiteError } from "../../process/ProcessOwnershipObservation.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
-import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
 import { err, ok } from "../../domain/result.js";
 
 const DATABASE_TARGET: BinaryTarget = {
@@ -102,6 +108,55 @@ it("uses one owner readiness snapshot for candidate availability and capabilitie
       diagnostics: { failure_stage: "self-test" },
     },
     capabilities: [{ operation: "address_name" }],
+  });
+});
+
+it("reports a missing Linux ps as one candidate's unavailability and keeps the others", async () => {
+  const base = candidate("alpha").provider;
+  const gamma = candidate("gamma").provider;
+  const refused: AnalysisProviderCandidate = {
+    ...base,
+    // Mirrors a provider adapter re-attributing the refusal to its own operation.
+    inspectReadinessSnapshot: () => {
+      throw new AnalysisCapabilityUnavailableError(
+        "process-ownership",
+        "ghidra:inspection",
+        "ps is unavailable",
+        {
+          cause: new LinuxOwnedProcessPrerequisiteError(
+            new Error("spawn ps ENOENT"),
+          ),
+        },
+      );
+    },
+  };
+
+  const statuses = await new AnalysisProviderRegistry([
+    refused,
+    gamma,
+  ]).candidates();
+  expect(statuses).toMatchObject([
+    {
+      provider: { id: "alpha" },
+      availability: {
+        status: "unavailable",
+        code: "runtime_unavailable",
+        reason: expect.stringContaining("spawn ps ENOENT") as unknown,
+        diagnostics: { stage: "ownership_preparation" },
+      },
+      capabilities: [{ operation: "address_name" }],
+    },
+    { provider: { id: "gamma" }, availability: { status: "available" } },
+  ]);
+
+  const selected = await new AnalysisProviderRegistry([refused]).select(
+    DATABASE_TARGET,
+    "alpha",
+  );
+  if (selected.ok) throw new Error("expected the prerequisite refusal");
+  expect(selected.error).toMatchObject({
+    _tag: "AnalysisCapabilityUnavailableError",
+    providerId: "process-ownership",
   });
 });
 
@@ -606,6 +661,73 @@ const capability = (provider: ProviderIdentity): CapabilityDescriptor => ({
   limitations: [],
 });
 
+describe("analysis provider registry: explicit profile refusals", () => {
+  const refusing = (refusal: AnalysisUnsupportedTargetError) => ({
+    ...candidate("ghidra").provider,
+    resolveAnalysisProfile: () => Promise.resolve(err(refusal)),
+  });
+
+  it("keeps a refusing provider's reason, recovery and evidence in the selection failure", async () => {
+    const capturedOutput = {
+      stdout: "",
+      stderr: "x86-64 only",
+      truncated: false,
+    };
+    const refusal = new AnalysisUnsupportedTargetError(
+      "resolve_analysis_profile",
+      DATABASE_TARGET.path,
+      "The configured extension supports x86-64 only.",
+      {
+        remediationAction: "Omit the extension setting for this target.",
+        capturedOutput,
+        diagnostics: { extension: "fixture" },
+      },
+    );
+    const selected = await new AnalysisProviderRegistry([
+      refusing(refusal),
+    ]).select(DATABASE_TARGET, "ghidra");
+    if (selected.ok) throw new Error("expected a profile refusal");
+    expect(selected.error).toBeInstanceOf(ProviderSelectionError);
+    expect(selected.error.cause).toBe(refusal);
+    expect(projectAnalysisError(selected.error)).toMatchObject({
+      code: "capability_unavailable",
+      message: refusal.message,
+      remediation: { action: "Omit the extension setting for this target." },
+      details: {
+        selection_reason: "target_unsupported",
+        requested_provider_id: "ghidra",
+        candidate_ids: ["ghidra"],
+        rejections: [
+          {
+            provider_id: "ghidra",
+            code: "target_format_unsupported",
+            reason: "The configured extension supports x86-64 only.",
+          },
+        ],
+        captured_output: capturedOutput,
+        diagnostics: { extension: "fixture" },
+      },
+    });
+  });
+
+  it("returns a refusal with unconfirmed cleanup unchanged", async () => {
+    const refusal = new AnalysisUnsupportedTargetError(
+      "resolve_analysis_profile",
+      DATABASE_TARGET.path,
+      "The configured extension supports x86-64 only.",
+      { cleanup: { reason: "probe close failed", resources: ["/tmp/probe"] } },
+    );
+    const selected = await new AnalysisProviderRegistry([
+      refusing(refusal),
+    ]).select(DATABASE_TARGET, "ghidra");
+    if (selected.ok) throw new Error("expected a profile refusal");
+    expect(selected.error).toBe(refusal);
+    expect(projectAnalysisError(selected.error)).toMatchObject({
+      code: "cleanup_incomplete",
+      details: { cleanup: "incomplete", resources: ["/tmp/probe"] },
+    });
+  });
+});
 describe("profile resolution terminal facts", () => {
   it.each([false, true])(
     "preserves a physical profile failure across late caller abort (throws: %s)",
@@ -825,7 +947,9 @@ it("joins cancelled readiness finalization and shutdown before admitting another
   const registry = new AnalysisProviderRegistry([
     {
       ...base,
-      inspectAvailability: async ({ signal } = {}) => {
+      inspectAvailability: async ({
+        signal,
+      }: AnalysisProviderInspectionOptions = {}) => {
         calls++;
         if (calls === 1) {
           observed = signal;
@@ -982,7 +1106,9 @@ it("registers selection before async readiness can race shutdown", async () => {
   const registry = new AnalysisProviderRegistry([
     {
       ...base,
-      inspectAvailability: async ({ signal } = {}) => {
+      inspectAvailability: async ({
+        signal,
+      }: AnalysisProviderInspectionOptions = {}) => {
         calls++;
         observed = signal;
         return base.inspectAvailability();

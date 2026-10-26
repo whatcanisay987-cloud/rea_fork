@@ -14,10 +14,14 @@ import {
 } from "../../contracts/providerSelection.js";
 import type { AnalysisProfileCommitment } from "../../domain/analysisProfile.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
-import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisUnsupportedTargetError,
+} from "../../domain/analysisErrorCore.js";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   ProviderSelectionError,
+  type ProviderSelectionErrorOptions,
   type ProviderSelectionFailureReason,
   type ProviderSelectionRejection,
 } from "../../domain/providerSelectionError.js";
@@ -31,17 +35,19 @@ import type {
   AnalysisProviderCandidate,
   AnalysisProviderBoundClientFactory,
   AnalysisProviderInspectionOptions,
+  AnalysisProviderReadinessSnapshot,
   CapabilityDescriptor,
   ProviderAvailability,
   ProviderIdentity,
   ProviderTargetSupport,
+  RetainedResourceScope,
 } from "../AnalysisProvider.js";
 import {
   evaluateAnalysisProviderCandidate,
   type AnalysisProviderCandidateEvaluation,
 } from "./AnalysisProviderEvaluation.js";
 import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
-import type { RetainedResourceScope } from "../AnalysisProvider.js";
+import { ownedProcessPrerequisiteAvailability } from "../ownedProcessAvailability.js";
 
 /** Deterministic discovery truth for one configured deep provider. */
 export interface AnalysisProviderCandidateStatus {
@@ -593,9 +599,29 @@ export class AnalysisProviderRegistry {
     );
     if (!evaluation.ok) return evaluation;
     const evaluated = evaluation.value;
-    if (evaluated.profileError !== undefined)
-      return err(evaluated.profileError);
     const statuses = replaceCandidate(baseline, evaluated.status);
+    const refusal = evaluated.profileError;
+    // A selected provider refusing the target is a selection outcome that keeps the
+    // refusal's reason, recovery and evidence; unconfirmed cleanup stays with the refusal.
+    if (
+      refusal instanceof AnalysisUnsupportedTargetError &&
+      !refusal.cleanupIncomplete
+    )
+      return err(
+        selectionError("target_unsupported", providerId, statuses, {
+          refusal: {
+            userMessage: refusal.message,
+            ...(refusal.remediationAction === undefined
+              ? {}
+              : { remediationAction: refusal.remediationAction }),
+            capturedOutput: refusal.capturedOutput,
+            diagnostics: refusal.diagnostics,
+            partialObservation: refusal.partialObservation,
+            cause: refusal,
+          },
+        }),
+      );
+    if (refusal !== undefined) return err(refusal);
     if (evaluated.profile === undefined)
       return err(selectionError("provider_unavailable", providerId, statuses));
     return ok(
@@ -709,21 +735,32 @@ const candidateStatus = async (
   const { signal, scope, resourceScope, operation } = context;
   if (signal.aborted)
     throw new AnalysisCancelledError(operation, { cause: signal.reason });
-  const readiness =
-    provider.inspectReadinessSnapshot === undefined
-      ? {
-          availability: await provider.inspectAvailability({
+  let readiness: AnalysisProviderReadinessSnapshot;
+  try {
+    readiness =
+      provider.inspectReadinessSnapshot === undefined
+        ? {
+            availability: await provider.inspectAvailability({
+              signal,
+              scope,
+              resourceScope,
+            }),
+            capabilities: provider.capabilities(),
+          }
+        : await provider.inspectReadinessSnapshot({
             signal,
             scope,
             resourceScope,
-          }),
-          capabilities: provider.capabilities(),
-        }
-      : await provider.inspectReadinessSnapshot({
-          signal,
-          scope,
-          resourceScope,
-        });
+          });
+  } catch (cause: unknown) {
+    // Status reports the gap per provider; execution keeps the prerequisite's owner.
+    const availability =
+      operation === "binary_session"
+        ? ownedProcessPrerequisiteAvailability(cause)
+        : undefined;
+    if (availability === undefined) throw cause;
+    readiness = { availability, capabilities: provider.capabilities() };
+  }
   return await projectCandidateStatus(provider, target, readiness, {
     signal,
     scope,
@@ -818,9 +855,19 @@ const selectionError = (
   options: {
     readonly operation?: string;
     readonly rejectionCandidates?: readonly AnalysisProviderCandidateStatus[];
+    readonly refusal?: Pick<
+      ProviderSelectionErrorOptions,
+      | "userMessage"
+      | "remediationAction"
+      | "capturedOutput"
+      | "diagnostics"
+      | "partialObservation"
+      | "cause"
+    >;
   } = {},
 ): ProviderSelectionError =>
   new ProviderSelectionError({
+    ...options.refusal,
     operation: options.operation ?? "open_binary",
     reason,
     requestedProviderId,
