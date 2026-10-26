@@ -43,28 +43,38 @@ it("keeps literal wrapper-shaped dictionaries as real root maps", () => {
   }
 });
 
-it("retains own binary dictionary facts when a prototype key changes the decoder prototype", () => {
-  const object = Object.fromEntries([
-    ["__proto__", { inherited: "not an own fact" }],
-    ["payload", "retained"],
-  ]);
-  const graph = decodeKeyedArchiveBytes(
-    Buffer.from(
-      buildBinary({
-        $archiver: "NSKeyedArchiver",
-        $version: 100000,
-        $objects: ["$null", object],
-        $top: { root: { UID: 1 } },
-      }),
-    ),
-    { offset: 0, limit: 10 },
-  );
-  expect(graph.objects[1]).toMatchObject({
-    kind: "dictionary",
-    value: { payload: "retained" },
-  });
-  expect(graph.objects[1]?.value).toEqual({ payload: "retained" });
-  expect(graph.limitations).toContainEqual(
-    expect.stringContaining("__proto__"),
-  );
-});
+it.each([
+  { encoding: "XML", encode: build },
+  { encoding: "binary", encode: buildBinary },
+])(
+  "retains own $encoding dictionary keys without changing the prototype",
+  ({ encode }) => {
+    const object = Object.fromEntries([
+      ["__proto__", { inherited: "not an own fact" }],
+      ["payload", "retained"],
+    ]);
+    const graph = decodeKeyedArchiveBytes(
+      Buffer.from(
+        encode({
+          $archiver: "NSKeyedArchiver",
+          $version: 100000,
+          $objects: ["$null", object],
+          $top: { root: { UID: 1 } },
+        }),
+      ),
+      { offset: 0, limit: 10 },
+    );
+    expect(graph.objects[1]).toMatchObject({
+      kind: "dictionary",
+      value: { payload: "retained" },
+    });
+    const value = graph.objects[1]?.value;
+    expect(value).toEqual(object);
+    expect(Object.hasOwn(value!, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+    expect(value).not.toHaveProperty("inherited");
+    expect(graph.limitations).not.toContainEqual(
+      expect.stringContaining("__proto__"),
+    );
+  },
+);
