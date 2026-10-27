@@ -6,8 +6,8 @@ on:
   pull_request:
     branches: [main, "release/*"]
   schedule:
-    - cron: "23 0-2,4-23 * * *"
-    - cron: "23 3 * * *"
+    # Daily at 03:23 Asia/Shanghai (19:23 UTC on the preceding day).
+    - cron: "23 19 * * *"
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -116,7 +116,7 @@ jobs:
           CI_REPOSITORY: ${{ github.repository }}
           CI_REPOSITORY_ID: ${{ github.repository_id }}
           CI_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          CI_FORCE_FULL: ${{ github.event.schedule == '23 3 * * *' }}
+          CI_FORCE_FULL: "true"
         run: node scripts/ci/qualification.mjs
       - name: Select verification lanes
         id: plan

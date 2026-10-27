@@ -16,9 +16,18 @@ import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 const execute = promisify(execFile);
 
 // Release rehearsal runs on Linux; the npm process adapter is also exercised on macOS.
-it.skipIf(process.platform === "win32")(
-  "fails without declared runtime, then rehearses an installed tarball and rejects catalog drift",
-  async () => {
+// Each rehearsal owns its deadline and workspace. Multiple npm installations
+// must not compete for a single case's 30-second budget under coverage.
+it
+  .skipIf(process.platform === "win32")
+  .each([
+    "missing runtime",
+    "valid artifact",
+    "catalog drift",
+    "wrong identity",
+  ] as const)(
+  "rehearses an installed release tarball: %s",
+  async (scenario) => {
     const root = await createTestTempDirectory("rea-release-canary-");
     const candidate = join(root, "candidate");
     const controller = join(root, "controller");
@@ -45,7 +54,7 @@ it.skipIf(process.platform === "win32")(
       join(candidate, "package.json"),
       JSON.stringify({
         name: "rea-agents",
-        version,
+        version: scenario === "wrong identity" ? "0.0.0" : version,
         type: "module",
         files: ["scripts"],
       }),
@@ -56,7 +65,17 @@ it.skipIf(process.platform === "win32")(
     );
     await writeFile(
       join(candidate, "scripts/reply.json"),
-      JSON.stringify(snapshot),
+      JSON.stringify(
+        scenario === "catalog drift"
+          ? {
+              ...snapshot,
+              tools: {
+                ...snapshot.tools,
+                tools: snapshot.tools.tools.slice(0, -1),
+              },
+            }
+          : snapshot,
+      ),
     );
     await writeFile(
       join(candidate, "scripts/rea.mjs"),
@@ -111,14 +130,27 @@ if (process.argv[2] === "mcp") {
         ],
         { cwd: controller, maxBuffer: 16 * 1024 * 1024 },
       );
-    await expect(invoke()).rejects.toMatchObject({
-      stderr: expect.stringContaining("ERR_MODULE_NOT_FOUND"),
-    });
+    if (scenario === "missing runtime") {
+      await expect(invoke()).rejects.toMatchObject({
+        stderr: expect.stringContaining("ERR_MODULE_NOT_FOUND"),
+      });
+      return;
+    }
     await symlink(
       resolve("dist"),
       join(controller, "dist"),
       process.platform === "win32" ? "junction" : "dir",
     );
+    if (scenario === "catalog drift" || scenario === "wrong identity") {
+      await expect(invoke()).rejects.toMatchObject({
+        stderr: expect.stringContaining(
+          scenario === "catalog drift"
+            ? "invalid canonical tool catalog"
+            : "Installed package identity",
+        ),
+      });
+      return;
+    }
     const result = JSON.parse((await invoke()).stdout);
     expect(result).toMatchObject({
       package: "rea-agents",
@@ -131,37 +163,6 @@ if (process.argv[2] === "mcp") {
         status: "verified",
         descendants: [],
       });
-    // Repack with one omitted canonical tool; the real protocol still succeeds,
-    // so only the independent release catalog assertion can reject this artifact.
-    snapshot.tools.tools.pop();
-    await writeFile(
-      join(candidate, "scripts/reply.json"),
-      JSON.stringify(snapshot),
-    );
-    await execute("npm", ["pack", "--ignore-scripts", "--json"], {
-      cwd: candidate,
-    });
-    await expect(invoke()).rejects.toMatchObject({
-      stderr: expect.stringContaining("invalid canonical tool catalog"),
-    });
-    await writeFile(
-      join(candidate, "package.json"),
-      JSON.stringify({
-        name: "rea-agents",
-        version: "0.0.0",
-        type: "module",
-        files: ["scripts"],
-      }),
-    );
-    const wrong = await execute("npm", ["pack", "--ignore-scripts", "--json"], {
-      cwd: candidate,
-    });
-    const [{ filename: wrongFilename }] = z
-      .tuple([z.object({ filename: z.string() })])
-      .parse(JSON.parse(wrong.stdout));
-    await expect(invoke(join(candidate, wrongFilename))).rejects.toMatchObject({
-      stderr: expect.stringContaining("Installed package identity"),
-    });
   },
   30_000,
 );

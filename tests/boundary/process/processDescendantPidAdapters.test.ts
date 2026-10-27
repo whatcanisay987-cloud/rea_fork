@@ -141,8 +141,12 @@ itWithCaptureCapability.each([
     }
     const [first, second] = captures;
     if (first === undefined) throw new Error("Capture was not retained");
+    // Native PTY chunk boundaries and intermediate rendered frames can vary.
+    // PID normalization promises identical text, not identical event journals.
     if (second !== undefined)
-      expect(compareProcessCaptures(first, second).terminal).toBe("unchanged");
+      expect(second.frames.map(({ data }) => data).join("")).toBe(
+        first.frames.map(({ data }) => data).join(""),
+      );
     const legacyContract = { ...first.manifest.comparison_contract };
     delete legacyContract.terminal_observation_version;
     const legacy = parseProcessCapture({

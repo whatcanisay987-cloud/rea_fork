@@ -487,6 +487,7 @@ it("keeps fast feedback separate from complete qualification and release proof",
               z.object({
                 run: z.string().optional(),
                 if: z.string().optional(),
+                env: z.record(z.string(), z.unknown()).optional(),
                 with: z.record(z.string(), z.unknown()).optional(),
               }),
             )
@@ -502,10 +503,14 @@ it("keeps fast feedback separate from complete qualification and release proof",
         ),
       ),
     );
-  expect(ci.on.schedule).toEqual([
-    { cron: "23 0-2,4-23 * * *" },
-    { cron: "23 3 * * *" },
-  ]);
+  expect(ci.on.schedule).toEqual([{ cron: "23 19 * * *" }]);
+  const admission = ci.jobs.changes?.steps?.find((step) =>
+    step.run?.includes("node scripts/ci/qualification.mjs"),
+  );
+  expect(admission?.if).toBe(
+    "github.event_name == 'schedule' && inputs.source_sha == ''",
+  );
+  expect(admission?.env?.CI_FORCE_FULL).toBe("true");
   expect(ci.concurrency.group).toContain("'qualification' || 'feedback'");
   expect(ci.concurrency.group).toContain("inputs.source_sha ||");
   expect(ci.concurrency.group).toContain("github.ref");

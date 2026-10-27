@@ -104,6 +104,26 @@ it("compares normalized terminal facts while retaining different source text for
   ).toMatchObject({ terminal: "changed" });
 });
 
+it("preserves terminal journal differences even when normalized transcripts match", () => {
+  const capture = emptyCapture();
+  const lines = ["root pid <pid>\r\n", "child pid <pid>\r\n"];
+  const left = {
+    ...capture,
+    frames: [{ sequence: 0, at_ms: 0, data: lines.join("") }],
+  };
+  const right = {
+    ...capture,
+    frames: lines.map((data, sequence) => ({ sequence, at_ms: 0, data })),
+  };
+  expect(left.frames.map(({ data }) => data).join("")).toBe(
+    right.frames.map(({ data }) => data).join(""),
+  );
+  expect(compareFullyObserved(left, right)).toMatchObject({
+    terminal: "changed",
+    first_divergence: { status: "found", dimension: "terminal" },
+  });
+});
+
 it("distinguishes added evidence from unknown observations", () => {
   const capture = emptyCapture();
   const added = compareFullyObserved(capture, {
