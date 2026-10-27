@@ -1,13 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main, "release/*"]
-  schedule:
-    # Daily at 03:23 Asia/Shanghai (19:23 UTC on the preceding day).
-    - cron: "23 19 * * *"
   workflow_dispatch:
   workflow_call:
     inputs:

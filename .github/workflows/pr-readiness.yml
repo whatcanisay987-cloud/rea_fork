@@ -1,17 +1,6 @@
 name: PR readiness
 
 on:
-  pull_request_target:
-    branches: [main, "release/*"]
-    types:
-      [
-        opened,
-        edited,
-        synchronize,
-        reopened,
-        ready_for_review,
-        converted_to_draft,
-      ]
   workflow_dispatch:
     inputs:
       pull_request_number:

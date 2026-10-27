@@ -1,9 +1,12 @@
-name: Full PR qualification
+name: Full revision qualification
 
 on:
-  pull_request:
-    branches: [main, "release/*"]
-    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Source SHA matching the selected workflow ref
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,8 +14,7 @@ permissions:
 
 jobs:
   qualification:
-    name: Qualify labeled PR revision
-    if: github.event.label.name == 'ci:full'
+    name: Qualify selected revision
     uses: ./.github/workflows/ci.yml
     with:
-      source_sha: ${{ github.sha }}
+      source_sha: ${{ inputs.source_sha }}

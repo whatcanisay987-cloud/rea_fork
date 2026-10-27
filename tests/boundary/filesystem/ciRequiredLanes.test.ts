@@ -122,7 +122,7 @@ it("exports every canonical scope with read authority for admission and keeps te
   const timings = z
     .object({
       on: z.object({
-        schedule: z.array(z.object({ cron: z.string() })),
+        schedule: z.array(z.object({ cron: z.string() })).optional(),
         workflow_dispatch: z.unknown(),
         workflow_run: z.unknown().optional(),
       }),
@@ -149,7 +149,7 @@ it("exports every canonical scope with read authority for admission and keeps te
       ),
     );
   expect(timings.on.workflow_run).toBeUndefined();
-  expect(timings.on.schedule).toHaveLength(1);
+  expect(timings.on.schedule).toBeUndefined();
   expect(timings.permissions).toEqual({
     contents: "read",
     actions: "read",
@@ -454,9 +454,9 @@ it("keeps fast feedback separate from complete qualification and release proof",
   const ci = z
     .object({
       on: z.object({
-        push: z.unknown(),
-        pull_request: z.unknown(),
-        schedule: z.array(z.object({ cron: z.string() })),
+        push: z.unknown().optional(),
+        pull_request: z.unknown().optional(),
+        schedule: z.array(z.object({ cron: z.string() })).optional(),
         workflow_call: z.object({
           inputs: z.object({
             source_sha: z.object({
@@ -503,14 +503,9 @@ it("keeps fast feedback separate from complete qualification and release proof",
         ),
       ),
     );
-  expect(ci.on.schedule).toEqual([{ cron: "23 19 * * *" }]);
-  const admission = ci.jobs.changes?.steps?.find((step) =>
-    step.run?.includes("node scripts/ci/qualification.mjs"),
-  );
-  expect(admission?.if).toBe(
-    "github.event_name == 'schedule' && inputs.source_sha == ''",
-  );
-  expect(admission?.env?.CI_FORCE_FULL).toBe("true");
+  expect(ci.on.push).toBeUndefined();
+  expect(ci.on.pull_request).toBeUndefined();
+  expect(ci.on.schedule).toBeUndefined();
   expect(ci.concurrency.group).toContain("'qualification' || 'feedback'");
   expect(ci.concurrency.group).toContain("inputs.source_sha ||");
   expect(ci.concurrency.group).toContain("github.ref");

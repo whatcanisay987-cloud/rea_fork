@@ -41,11 +41,9 @@ async function workflow(name: string) {
     );
 }
 
-it("refreshes title validation on edits without checking out PR code or cancelling CI", async () => {
+it("keeps optional title validation manual without checking out PR code", async () => {
   const title = await workflow("pr-title.yml");
-  expect(title.on.pull_request).toMatchObject({
-    types: ["opened", "synchronize", "reopened", "edited"],
-  });
+  expect(Object.keys(title.on)).toEqual(["workflow_dispatch"]);
   expect(title.permissions).toEqual({});
   expect(title.concurrency?.group).not.toBe(
     (await workflow("ci.yml")).concurrency?.group,
@@ -58,7 +56,7 @@ it("refreshes title validation on edits without checking out PR code or cancelli
   expect(steps).toHaveLength(1);
   expect(steps[0]?.uses).toBeUndefined();
   expect(steps[0]?.env).toEqual({
-    PR_TITLE: "${{ github.event.pull_request.title }}",
+    PR_TITLE: "${{ inputs.title }}",
   });
   const command = z.string().parse(steps[0]?.run);
   for (const title of [
@@ -82,16 +80,15 @@ it("refreshes title validation on edits without checking out PR code or cancelli
   expect((await workflow("ci.yml")).jobs["pr-title"]).toBeUndefined();
 });
 
-it("qualifies only ci:full label additions at the caller's merge revision", async () => {
+it("keeps exact-revision qualification manual and separate from fork feedback", async () => {
   const full = await workflow("ci-full-pr.yml");
-  expect(full.on.pull_request).toMatchObject({ types: ["labeled"] });
+  expect(Object.keys(full.on)).toEqual(["workflow_dispatch"]);
   expect(full.permissions).toEqual({ contents: "read", actions: "read" });
   expect(Object.values(full.jobs)).toEqual([
     {
-      name: "Qualify labeled PR revision",
-      if: "github.event.label.name == 'ci:full'",
+      name: "Qualify selected revision",
       uses: "./.github/workflows/ci.yml",
-      with: { source_sha: "${{ github.sha }}" },
+      with: { source_sha: "${{ inputs.source_sha }}" },
     },
   ]);
   expect(full.jobs.qualification).not.toHaveProperty("secrets");

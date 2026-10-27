@@ -1,27 +1,6 @@
 name: Real packet capture
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "tests/boundary/captures/**"
-      - "tests/boundary/cli/captureCleanup.test.ts"
-      - "tests/boundary/mcp/packetCaptureMcp.test.ts"
-      - "src/captures/**"
-      - "src/pcap/**"
-      - "src/domain/pcap/**"
-      - "src/domain/analysisView/pcapCaptureView.ts"
-      - "src/application/pcap/**"
-      - "src/contracts/pcap/**"
-      - "src/server/registerPcapTools.ts"
-      - "tests/boundary/pcap/**"
-      - "src/domain/captures/**"
-      - "src/application/captures/**"
-      - "src/contracts/captures/**"
-      - "src/composition/captures.ts"
-      - "src/cli/captureCommands.ts"
-      - "src/server/registerCaptureTools.ts"
-      - "scripts/verify-packet-capture.mjs"
-      - ".github/workflows/real-packet-capture.yml"
 permissions:
   contents: read
 env:

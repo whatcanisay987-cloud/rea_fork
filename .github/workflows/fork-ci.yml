@@ -1,0 +1,48 @@
+name: Fork CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 03:23 Asia/Shanghai.
+    - cron: "23 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-ci-${{ github.event_name == 'schedule' && 'nightly' || 'feedback' }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+env:
+  HUSKY: "0"
+  NODE_OPTIONS: --max-old-space-size=3072
+  CI_FORK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+
+jobs:
+  core:
+    name: Fork core checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - name: Cache npm package downloads
+        uses: ./.github/actions/npm-cache
+        with:
+          save: "true"
+      - run: npm ci
+      - name: Type, lint and format checks
+        run: npm run check:ci:fast
+      - name: Compile the CLI and MCP runtime
+        run: npm run build:cached
+      - name: Related tests or nightly core regression
+        run: node scripts/ci/fork-checks.mjs

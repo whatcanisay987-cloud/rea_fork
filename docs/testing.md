@@ -7,6 +7,25 @@ installed-client and agent runs.
 
 ## Developer commands
 
+### Fork automation policy
+
+This fork uses a single automatic workflow, `Fork CI`, with one Linux job.
+Main pushes and pull requests run typechecking, lint, formatting, a CLI/MCP build,
+affected source tests, and directly changed test files. CI configuration changes
+also run the fork-policy tests. New branches or unavailable comparison bases
+fall back to the core regression scope.
+
+At 03:23 Asia/Shanghai each day, and on manual `Fork CI` dispatch, the same job
+runs all source tests plus the PR-health, descendant-PID and release-canary
+boundaries. New feedback cancels superseded feedback; the daily run has its own
+concurrency group. Failed checks retain their failing exit status.
+
+The large `CI` workflow remains manual or reusable by an explicitly requested
+release qualification. Native host matrices, real-provider integration lanes,
+coverage, deep static analysis, mutation sweeps and timing collection are not
+automatic fork obligations. Optional title/readiness checks and release helpers
+also require manual dispatch. Their validation logic remains available.
+
 Use source feedback while editing, explicit boundary checks for the changed
 behavior, and complete CI evidence before merging.
 
@@ -1625,19 +1644,14 @@ failed, cancelled, skipped, or missing selected shards cannot pass the gate or
 publish successful timing history. This deliberately avoids relying on an
 import graph for generated files, filesystem inputs, subprocesses, or bridges.
 
-Scheduled qualification runs once daily at 19:23 UTC (03:23 the next day in
-Asia/Shanghai). Every scheduled run forces full validation to refresh runner and
-dependency drift, even when the exact source SHA has a recent successful
-qualification receipt. This replaces hourly scheduled runs and their repeated
-failure notifications. Push and PR feedback stays immediate; manual dispatch,
-`ci:full`, and exact release qualification also always run full validation.
+The fork's daily core regression is described above. Complete upstream
+qualification in `ci.yml` has no push, PR or schedule trigger in this fork;
+manual dispatch and exact release qualification always run its full validation.
 
 Full qualification includes aggregate coverage,
-every portable provider lane, and all native hosts below. Adding `ci:full`
-immediately starts the separate `Full PR qualification` workflow against the
-label event's merge revision; subsequent PR revisions also select the full tier
-in normal CI while that label remains. Unrelated labels do not start validation
-jobs or replace the main CI checks. Manual dispatch also requests full validation.
+every portable provider lane, and all native hosts below. Dispatch `CI` for the
+selected branch, or `Full revision qualification` with an exact source revision.
+PR labels do not trigger these large workflows in this fork.
 Fast-tier broad fallbacks keep the portable suite and the Linux x64 runtime
 baseline. They do not start every owner lane or the three-host package
 matrix. Intel macOS and coverage remain full-tier obligations. Real provider
