@@ -44,5 +44,5 @@ jobs:
         run: npm run check:ci:fast
       - name: Compile the CLI and MCP runtime
         run: npm run build:cached
-      - name: Related tests or nightly core regression
+      - name: Related tests or core regression
         run: node scripts/ci/fork-checks.mjs

@@ -9,12 +9,31 @@ const CORE_BOUNDARIES = [
   "tests/boundary/process/processDescendantPidAdapters.test.ts",
   "tests/boundary/process/releaseArtifactCanary.test.ts",
 ];
+const MAX_DIRECT_TEST_FILES = 100;
 const usableBase = (base) =>
   /^[a-f0-9]{40}$/u.test(base ?? "") && !/^0+$/u.test(base);
 
 /** The fork's explicit core scope, independent of upstream qualification. */
 export function planForkTests({ event, base, files }) {
-  if (["schedule", "workflow_dispatch"].includes(event) || !usableBase(base))
+  const direct = new Set(
+    files.filter(
+      (file) =>
+        /^(src|tests)\/.+\.test\.ts$/u.test(file) &&
+        !/[\\\0\r\n]/u.test(file) &&
+        file
+          .split("/")
+          .every((part) => part && part !== "." && part !== "..") &&
+        projectForTest(file).group === "built",
+    ),
+  );
+  if (files.some((file) => /^(\.github\/|scripts\/ci\/)/u.test(file)))
+    direct.add(CORE_BOUNDARIES[0]);
+  // Bulk upstream updates use nightly core coverage; full acceptance stays manual.
+  if (
+    ["schedule", "workflow_dispatch"].includes(event) ||
+    !usableBase(base) ||
+    direct.size > MAX_DIRECT_TEST_FILES
+  )
     return {
       mode: "core",
       commands: [
@@ -22,21 +41,12 @@ export function planForkTests({ event, base, files }) {
         ["scripts/run-development-tests.mjs", "focused", ...CORE_BOUNDARIES],
       ],
     };
-  const direct = files.filter(
-    (file) =>
-      /^(src|tests)\/.+\.test\.ts$/u.test(file) &&
-      !/[\\\0\r\n]/u.test(file) &&
-      file.split("/").every((part) => part && part !== "." && part !== "..") &&
-      projectForTest(file).group === "built",
-  );
-  if (files.some((file) => /^(\.github\/|scripts\/ci\/)/u.test(file)))
-    direct.push(CORE_BOUNDARIES[0]);
   return {
     mode: "related",
     commands: [
       ["scripts/run-development-tests.mjs", "changed", "--base", base],
-      ...(direct.length
-        ? [["scripts/run-development-tests.mjs", "focused", ...new Set(direct)]]
+      ...(direct.size
+        ? [["scripts/run-development-tests.mjs", "focused", ...direct]]
         : []),
     ],
   };

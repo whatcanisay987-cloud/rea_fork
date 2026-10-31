@@ -50,6 +50,26 @@ it("does not run source test files twice", () => {
   ).toEqual([["scripts/run-development-tests.mjs", "changed", "--base", base]]);
 });
 
+it.each([
+  [100, "related"],
+  [101, "core"],
+] as const)(
+  "uses %s changed boundary-test files within the fork check budget (%s)",
+  (count, mode) => {
+    const files = Array.from(
+      { length: count },
+      (_, index) => `tests/boundary/filesystem/changed-${index}.test.ts`,
+    );
+    const plan = planForkTests({ event: "push", base, files });
+    expect(plan.mode).toBe(mode);
+    if (mode === "core")
+      expect(plan.commands).toEqual(
+        planForkTests({ event: "schedule", base, files: [] }).commands,
+      );
+    else expect(plan.commands[1]?.slice(2)).toEqual(files);
+  },
+);
+
 it.each([undefined, "", "0".repeat(40), "--all"])(
   "falls back to core for unavailable base %s",
   (invalid) => {
