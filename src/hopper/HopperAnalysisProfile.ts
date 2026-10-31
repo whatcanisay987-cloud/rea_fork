@@ -43,6 +43,7 @@ import {
   type MachoTargetSelection,
 } from "../domain/apple/machoTargetSelection.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
+import { readFatMagicFormat } from "../domain/apple/machoContainer.js";
 import { err, ok, type Result } from "../domain/result.js";
 
 import {
@@ -100,11 +101,9 @@ const resolveHopperAnalysisProfileInScope = async (
       options.signal,
     );
     if (!header.ok) return header;
-    machoContainer = [0xcafebabf, 0xbfbafeca].includes(header.value)
-      ? "fat64"
-      : [0xcafebabe, 0xbebafeca].includes(header.value)
-        ? "fat32"
-        : "thin";
+    const fatFormat = readFatMagicFormat(header.value);
+    machoContainer =
+      fatFormat === null ? "thin" : fatFormat.wide ? "fat64" : "fat32";
   }
   let preparedImage: HopperMachOImage | undefined;
   if (
@@ -203,17 +202,6 @@ const resolveHopperAnalysisProfileInScope = async (
   });
 };
 
-/** Ghidra owns these lanes; Hopper names the family it declines rather than guessing. */
-const HOPPER_DECLINED_ARCHITECTURE_LABELS: Record<
-  ElfMetadataArchitecture | "hexagon",
-  string
-> = {
-  mips: "MIPS",
-  riscv: "RISC-V",
-  powerpc: "PowerPC",
-  hexagon: "Hexagon",
-};
-
 /** Families with no verified Hopper lane, declined before any loader selection. */
 export type HopperDeclinedArchitecture =
   | ElfMetadataArchitecture
@@ -227,12 +215,17 @@ export const isHopperDeclinedArchitecture = (
   architecture === "hexagon" ||
   architecture === "arm64_32";
 
+/**
+ * Hopper states only what it owns: it does not admit the family. It routes the
+ * caller to the Ghidra provider without restating or promising Ghidra's lane
+ * facts.
+ */
 export const hopperDeclinedArchitectureReason = (
   architecture: HopperDeclinedArchitecture,
 ): string =>
   architecture === "arm64_32"
     ? "REA's Hopper adapter has no verified arm64_32 lane."
-    : `REA's Hopper adapter does not admit ${HOPPER_DECLINED_ARCHITECTURE_LABELS[architecture]} targets. Select a verified Ghidra ${HOPPER_DECLINED_ARCHITECTURE_LABELS[architecture]} profile instead.`;
+    : `REA's Hopper adapter does not admit ${architecture} targets. Select the Ghidra provider instead.`;
 
 /** Derive Hopper's complete non-interactive CLI loader selection. */
 export const hopperLoaderArgsForTarget = (

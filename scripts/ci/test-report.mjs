@@ -93,6 +93,8 @@ if (selectionFile) {
 }
 if (passed && verifyInventory) {
   const actual = files.map(({ name }) => name);
+  if (actual.length === 0)
+    throw new Error("No portable test modules were reported");
   const expectedSet = new Set(expected);
   const actualSet = new Set(actual);
   const missing = expected.filter((path) => !actualSet.has(path));
@@ -101,7 +103,10 @@ if (passed && verifyInventory) {
     throw new Error(
       `Incomplete portable test inventory: ${JSON.stringify({ missing, unexpected, duplicateFiles: actual.length - actualSet.size })}`,
     );
+  if (files.every(({ state }) => state === "skipped"))
+    throw new Error("Every portable test module was skipped");
 }
+const skippedFiles = files.filter(({ state }) => state === "skipped");
 const summary = [
   groupsCompleted
     ? "## Merged test diagnostics"
@@ -121,6 +126,10 @@ const summary = [
   ...(process.env.SOURCE_REQUIRED === "true"
     ? [`Source result: ${process.env.SOURCE_RESULT ?? "unknown"}.`]
     : []),
+  `Skipped test modules: ${skippedFiles.length}. Their skip reasons and required coverage are not established by this report.`,
+  ...(skippedFiles.length ? [""] : []),
+  ...skippedFiles.map(({ name }) => `- ${name.replaceAll("|", "\\|")}`),
+  "",
   passed
     ? "Successful timing history is available."
     : "This report is diagnostic only and is not a successful timing baseline.",

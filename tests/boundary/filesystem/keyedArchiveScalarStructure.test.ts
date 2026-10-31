@@ -68,11 +68,13 @@ it.each([
       kind: "dictionary",
       value: { payload: "retained" },
     });
-    const value = graph.objects[1]?.value as Record<string, unknown>;
+    const value = graph.objects[1]?.value;
+    if (value === null || typeof value !== "object")
+      throw new Error("Expected a decoded dictionary");
     expect(value).toEqual(object);
     expect(Object.hasOwn(value, "__proto__")).toBe(true);
     expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
-    expect(value).not.toHaveProperty("inherited");
+    expect(Object.hasOwn(value, "inherited")).toBe(false);
     expect(graph.limitations).not.toContainEqual(
       expect.stringContaining("__proto__"),
     );

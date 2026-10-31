@@ -1,3 +1,4 @@
+import { safeParseUtf8Json } from "../domain/safeJson.js";
 import {
   bindArtifactFileCleanup,
   artifactFileCancellationCause,
@@ -154,6 +155,7 @@ const rejectedReply = (
       reply.message,
       {
         sqlite_value_or_record_bytes: SQLITE_DATABASE_LIMITS.outputBytes,
+        sqlite_sql_statement_bytes: SQLITE_DATABASE_LIMITS.outputBytes,
         worker_reply_bytes: SQLITE_DATABASE_LIMITS.outputBytes,
       },
       {
@@ -161,7 +163,7 @@ const rejectedReply = (
         diagnostics: { selected_path: selectedPath },
         retryable: false,
         remediationAction:
-          "The SQLite value/record and worker JSON reply allowances are fixed at 16 MiB; worker_timeout_ms and client deadlines do not raise them. If it preserves the requested facts, select exact columns, reduce row_limit, or use schema_scope: inventory instead of database. This worker refusal leaves no completed Evidence to retrieve. Do not repeat the unchanged request or truncate required database bytes.",
+          "The SQLite value/record, SQL statement and worker JSON reply allowances are each fixed at 16 MiB; this refusal does not identify which was exceeded. worker_timeout_ms and client deadlines do not raise them. If it preserves the requested facts, select exact columns, reduce row_limit, or use schema_scope: inventory instead of database. This worker refusal leaves no completed Evidence to retrieve. Do not repeat the unchanged request or truncate required database bytes.",
       },
     );
   if (reply.reason === "column-limit")
@@ -269,7 +271,9 @@ export const executeSqliteDatabaseWorker = async (request: {
       finalization = sqliteReplyCompletionFailure(cause, capturedOutput);
       file = completed;
     }
-    reply = replySchema.parse(JSON.parse(file.bytes.toString("utf8")));
+    const decoded = safeParseUtf8Json(file.bytes);
+    if (!decoded.ok) throw decoded.cause;
+    reply = replySchema.parse(decoded.value);
   } catch (cause: unknown) {
     throw sqliteReplyFinalizationFailure(
       sqliteReplyReadFailure(cause, capturedOutput),

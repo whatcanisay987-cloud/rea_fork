@@ -1,3 +1,4 @@
+import type { SavedAnalysisSnapshotPartialObservation } from "./savedAnalysisSnapshot.js";
 import type { AnalysisSettingLimit } from "./analysisSettings.js";
 import type { JsonValue } from "./jsonValue.js";
 
@@ -250,6 +251,7 @@ import type {
 } from "./process/processCapture.js";
 import type { FileOffsetPartialObservation } from "./native/fileOffsetPartialObservation.js";
 import type { NativeCallPartialObservation } from "./native/nativeCallPartialObservation.js";
+import type { HopperCallerReconciliationPartial } from "./native/hopperCallerReconciliation.js";
 import type { ElectronActivePartialObservation } from "./javascript/electronActiveObservation.js";
 import type { JavaScriptRuntimeObservation } from "./javascript/javascriptRuntimeObservation.js";
 import type {
@@ -269,7 +271,10 @@ import type {
   AdbPackagePullPartialObservation,
   AdbDisplayPartialObservation,
 } from "./adb/adbDeviceAnalysis.js";
-import type { InspectSignature } from "./native/nativeInspection.js";
+import type {
+  InspectMacho,
+  InspectSignature,
+} from "./native/nativeInspection.js";
 import type { NativeUiObservationResult } from "./native/nativeUiObservation.js";
 import type { BinaryLayout } from "./native/binaryLayout.js";
 import type {
@@ -295,8 +300,14 @@ import type { WebNetworkCapture } from "./webNetworkCapture.js";
 import type { FridaDeviceList, FridaProcessList } from "./fridaDiscovery.js";
 import type { CutterBridgeDiscovery } from "./cutterDiscovery.js";
 
+import type { WebTraceObservation } from "./webTraceObservation.js";
+import type { WebArtifactAcquisition } from "./webArtifactAcquisition.js";
+
 /** Provider-neutral evidence collected before a typed analysis failure. */
 export type AnalysisPartialObservation =
+  | SavedAnalysisSnapshotPartialObservation
+  | WebArtifactAcquisition
+  | WebTraceObservation
   | CutterBridgeDiscovery
   | FridaDeviceList
   | FridaProcessList
@@ -307,6 +318,7 @@ export type AnalysisPartialObservation =
   | FileSnapshotPartialObservation
   | PartialProcessCaptureObservation
   | NativeCallPartialObservation
+  | HopperCallerReconciliationPartial
   | FileOffsetPartialObservation
   | ElectronActivePartialObservation
   | BrowserScenarioPartialObservation
@@ -330,6 +342,7 @@ export type AnalysisPartialObservation =
   | FirmwarePartialObservation
   | NativeUiObservationResult
   | InspectSignature
+  | InspectMacho
   | ElectronPagePartialObservation
   | AdbActivityStartPartialObservation
   | AdbAcquiredFilePartialObservation
