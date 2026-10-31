@@ -35,7 +35,8 @@ it.each([true, false])(
     const before = await readdir(root);
     const inspection = await inspectIdaRegistration(path, resourceScope);
     const after = await readdir(root);
-    expect(inspection.available).toBe(exists);
+    // Windows normalizes missing/.. before lookup; POSIX traverses missing.
+    expect(inspection.available).toBe(exists || process.platform === "win32");
     expect(
       inspection.checks.find(({ name }) => name === "private_workspace")
         ?.detail,
